@@ -21,6 +21,21 @@ def url_valid(url):
     except:
         return False
 
-def get_base_URL(url):
-    print urlparse(url).hostname
-    return urlparse(url).hostname
+def get_base_url(url):
+    try:
+        base_url = urlparse(url).hostname
+        return base_url
+    except:
+        return None
+
+def remove_protocol(url):
+    replace_tokens = ["https://", "http://",'www.']
+    for token in replace_tokens:
+        url = url.replace(token,'')
+    return url
+
+def clean_url(url, leading=False):
+    if leading == True:
+        return url.strip('#').strip('/').strip()
+    else:
+        return url.rstrip('#').rstrip('/').strip()
