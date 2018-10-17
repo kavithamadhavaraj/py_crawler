@@ -1,21 +1,27 @@
 import sys
-import thread, time
-import Queue
+import time
 import json
-from retriever import PageRetriever
-from utils import interruption_handler, sanity_check, remove_protocol, clean_url
+import Queue
+import threading
+import requests
+from bs4 import BeautifulSoup
+from html_page_retriever import HTMLPageRetriever
+from sitemap_retriever import SiteMapRetriever
+from utils import sanity_check, remove_protocol, clean_url
+
 
 class Crawler(object):
-    def __init__(self, url, url_count=None, time_out=3):
-
-        if sanity_check(url, url_count):
-            self.root = url
-            self.url_count = url_count #Max number of pages to crawl
+    
+    def __init__(self, url, url_count=None, timeout=3, multi=5, strict=False):
+        if sanity_check(url, url_count, multi):
             self.crawler_queue = Queue.Queue()
             self.directory = {} #Directory structure of crawled links
+            self.root = url
+            self.url_count = url_count #Max number of pages to crawl            
             self.visits = set([]) #List of visited pages implemented in Set for faster lookups
-            self.retriever = PageRetriever(timeout= time_out)
-            self.interruption_flag = []
+            self.timeout = timeout #Timeout for the page requests
+            self.strict = strict #Strictly crawls same domain urls
+            self.multi = multi #Concurrent requests can happen
         else:
             return None
 
@@ -35,69 +41,108 @@ class Crawler(object):
         path: string
             Default is current directory
         """ 
+        print "Saving to file..."
         with open(path+'/'+file_name+'.json', 'w') as fp:
             json.dump(self.directory, fp, indent=4)
+        print "Finished"
     
-    def prepare_for_interruption(self):
-        #Create a thread that monitors the interruption
-        thread.start_new_thread(interruption_handler, (self.interruption_flag,))
-
-    def is_interrupted(self):
-        #PEP 8 way of checking if the list is empty. 
-        return self.interruption_flag
-
-    def register_visit(self, page):
-        #Adds a visited page to the list, to be shown to user
-        self.visits.add(clean_url(remove_protocol(page)))
-
-    def enque_pages(self, page_set):
-        #Enque all the collected urls, to be processed one by one
-        for page in page_set:
-            self.crawler_queue.put(clean_url(page))
-
-    def register_directory(self, page, page_set):
-        #Register a page, along with it's child URL's, to be shown / saved as file
-        self.directory[page] = list(page_set)
-
     def count_exceeded(self):
+        #Returns a boolean value to show if the count exceeded
         return len(self.visits) >= self.url_count
     
     def set_maximum(self):
-        #If the crawler is set to run untill interruption, set the maximum url count to infinity
+        #If the crawler is set to run until interruption, set the maximum url count to infinity
         self.url_count = float("inf")    
+    
+    def request(self, entry_url):
+        try:
+            #some santity checks
+            if self.timeout < 0:
+                raise ValueError("Timeout param can take only positive value")
+            if type(self.strict) != type(True):
+                raise ValueError("Strict param can take only boolean value")   
+            entry_url = clean_url(entry_url)
+            #Wait for some time before raising Timeout exception
+            page = requests.get(entry_url, timeout=self.timeout)
+            mime_type = page.headers['content-type']
+            page.raise_for_status()
+            #Stop if the no of pages visited is exceeded
+            if self.count_exceeded():
+                return
+            if page != None:
+                #Add the page to the visits list
+                self.visits.add(clean_url(remove_protocol(entry_url)))
+                soup = BeautifulSoup(page.text, 'lxml')      
+                if 'text/html' in mime_type:  
+                    #If the page is HTML delegate it to HTMLPageRetriever
+                    pr = HTMLPageRetriever(self.strict)
+                    pr.add_links(self.crawler_queue, self.directory, entry_url, soup)
+                elif 'text/xml' in mime_type:
+                    #If the page is XML delegate it to SiteMapRetriever
+                    sr = SiteMapRetriever(self.strict)
+                    sr.add_links(self.crawler_queue, self.directory, entry_url, soup)
+                print "--> " + entry_url
+                return
+        except requests.exceptions.ConnectionError as e:
+            print "Ignoring "+ entry_url + ", URL might be incorrect" 
+            return None
+        except requests.exceptions.Timeout as e:
+            print "Ignoring "+ entry_url + ", timeout error" 
+            return None
+        except requests.exceptions.RequestException as e:
+            print "Ignoring: "+ entry_url + ", " + e.message
+            return None
+        except RuntimeError as e:
+            print e
+            return None
 
     def process(self):
         try:
-            self.prepare_for_interruption()
             if self.url_count == None:
                 self.set_maximum()
-            #Process untill the queue is empty
-            while not self.crawler_queue.empty():  
-                page = clean_url(self.crawler_queue.get())
-                # If node hasn't been visited yet, proceed
-                if remove_protocol(page) not in self.visits:
-                    if self.is_interrupted():
-                        break
-                    #Collect URL's from the page
-                    linkset = self.retriever.get_links(page)
-                    #Register the node as visited
-                    self.register_visit(page)
-                    if linkset != None:
-                        #Load all the child URLs for further processing
-                        self.enque_pages(linkset)
-                        #Save the page and their child mapping
-                        self.register_directory(page, linkset)
-                    #If count is exceeding, break the process 
+
+            #Process until interrupted / count is matched
+            while True:
+                #Limit the number of threads to the user specified value
+                #enumerate always return the child threads along with the main thread, ignore the later
+                if (len(threading.enumerate())-1) < self.multi:
+                    #If count is exceeding, break the process
                     if self.count_exceeded():
-                        break
+                        break 
+                    #Wait until a mintue, to retrieve from queue
+                    page = clean_url(self.crawler_queue.get(block=True, timeout=60))
+                    # If node hasn't been visited yet, proceed
+                    if remove_protocol(page) not in self.visits:
+                        try:
+                            #Collect URL's from the page
+                            threading.Thread(target=self.request, args=[page]).start()
+                        except Exception as e:
+                            print e.message
+                            return
+                else:
+                    #Give some time for the threads to finish, since we should restrict the threads being spawned to the user-specified value
+                    time.sleep(2)
+            
         except KeyboardInterrupt as e:
-            print "\nExiting.."
+            print "\nExit process initiated"
+        except Queue.Empty as e:
+            print "\nDone.."
+        except ValueError as e:
+            print e.message
+        finally:
+            #Join all existing threads to main thread.
+            for thread in threading.enumerate():
+                if thread is not threading.currentThread():
+                    thread.join()
         return self.directory
 
     def engage(self):
         print "\nCrawler engaged"
         print "-"*20
         #Initiate the crawler, by placing the first URL in the processing queue
-        self.crawler_queue.put(self.root)
+        self.crawler_queue.put(clean_url(self.root))
         return self.process()
+    
+    
+
 

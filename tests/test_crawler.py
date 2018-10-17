@@ -6,7 +6,7 @@ from spider.crawler import Crawler
 class CrawlerTest(unittest.TestCase):
 
     def test_output_count(self):
-        self.crawler = Crawler("https://stackoverflow.com/questions", 5, time_out=10)
+        self.crawler = Crawler("https://stackoverflow.com/questions", 5, timeout=10)
         self.crawler.engage()
         self.assertEqual(len(self.crawler.directory.keys()), 5)
 
