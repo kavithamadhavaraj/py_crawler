@@ -69,7 +69,7 @@ class Crawler(object):
             #Stop if the no of pages visited is exceeded
             if self.count_exceeded():
                 return
-            if page != None:
+            if (page != None) and remove_protocol(entry_url) not in self.visits:
                 #Add the page to the visits list
                 self.visits.add(clean_url(remove_protocol(entry_url)))
                 soup = BeautifulSoup(page.text, 'lxml')      
@@ -81,15 +81,20 @@ class Crawler(object):
                     #If the page is XML delegate it to SiteMapRetriever
                     sr = SiteMapRetriever(self.strict)
                     sr.add_links(self.crawler_queue, self.directory, entry_url, soup)
+                else:
+                    return 
                 print "--> " + entry_url
                 return
         except requests.exceptions.ConnectionError as e:
+            self.visits.add(clean_url(remove_protocol(entry_url)))
             print "Ignoring "+ entry_url + ", URL might be incorrect" 
             return None
         except requests.exceptions.Timeout as e:
+            self.visits.add(clean_url(remove_protocol(entry_url)))
             print "Ignoring "+ entry_url + ", timeout error" 
             return None
         except requests.exceptions.RequestException as e:
+            self.visits.add(clean_url(remove_protocol(entry_url)))
             print "Ignoring: "+ entry_url + ", " + e.message
             return None
         except RuntimeError as e:
@@ -110,7 +115,7 @@ class Crawler(object):
                     if self.count_exceeded():
                         break 
                     #Wait until a mintue, to retrieve from queue
-                    page = clean_url(self.crawler_queue.get(block=True, timeout=60))
+                    page = clean_url(self.crawler_queue.get(block=True, timeout=self.timeout))
                     # If node hasn't been visited yet, proceed
                     if remove_protocol(page) not in self.visits:
                         try:
@@ -118,13 +123,15 @@ class Crawler(object):
                             threading.Thread(target=self.request, args=[page]).start()
                         except Exception as e:
                             print e.message
-                            return
+                            break
                 else:
                     #Give some time for the threads to finish, since we should restrict the threads being spawned to the user-specified value
                     time.sleep(2)
             
         except KeyboardInterrupt as e:
-            print "\nExit process initiated"
+            print '\n\n---------------------------'
+            print "\nFinishing the running jobs..."
+            print '\n-----------------------------'
         except Queue.Empty as e:
             print "\nDone.."
         except ValueError as e:
@@ -133,7 +140,7 @@ class Crawler(object):
             #Join all existing threads to main thread.
             for thread in threading.enumerate():
                 if thread is not threading.currentThread():
-                    thread.join()
+                    thread.join(self.timeout)
         return self.directory
 
     def engage(self):

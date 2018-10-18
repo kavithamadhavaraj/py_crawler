@@ -2,12 +2,12 @@
 Developer : Kavitha Madhavaraj
 
 To interrupt the program:
-    * Use ctrl+c 
+    * Use ctrl+c once
 """
 from spider.crawler import Crawler
 
 #Case 1: Specify the number of URL's to crawl 
-cr1 = Crawler('http://www.windowscentral.com/', url_count=30, strict=False, timeout=5, multi=10)
+cr1 = Crawler('http://www.windowscentral.com', strict=True, timeout=5, multi=10)
 directory =  cr1.engage()
 print "\n\nPages visited (Case1) : ", len(cr1.visits)
 #Save the crawled directory in a JSON file

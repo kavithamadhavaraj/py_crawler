@@ -32,8 +32,9 @@ def get_base_url(url):
 def remove_protocol(url):
     #Remove the following tokens from URL string
     replace_tokens = ["https://", "http://",'www.']
-    for token in replace_tokens:
-        url = url.replace(token,'')
+    if url != None:
+        for token in replace_tokens:
+            url = url.replace(token,'')
     return url
 
 def clean_url(url, leading=False):

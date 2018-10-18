@@ -29,19 +29,24 @@ class SiteMapRetriever(Retriever):
         if link_set == None:
             raise RuntimeWarning("malformed sitemap")
 
-        directory[entry_url] = set([])
+        directory[entry_url] = set()
+        domain = remove_protocol(get_base_url(entry_url))
+
         for link in link_set:
             #Find the url tags from XML and clean them for relative paths
             link = link.findNext("loc")
             if link != None:
                 url = self.same_domain_cleanup(entry_url, link.text)
-                #If strict flag is set, ignore the url from other domains
-                if ((self.strict_domain == True) and (remove_protocol(get_base_url(url)) != remove_protocol(get_base_url(entry_url)))):
-                    continue
-                #If the url is valid, add it to queue, register in directory
-                if (url != None) and (url != '') and (url != entry_url):
-                    process_queue.put(clean_url(url))
-                    directory[entry_url].add(url)
+                if (url != None):
+                    #If strict flag is set, ignore the url from other domains
+                    if (self.strict_domain == True): 
+                        if (remove_protocol(get_base_url(url)) != domain):
+                            continue
+                    if (url != entry_url):
+                        #Load all the child URLs for further processing
+                        process_queue.put(clean_url(url))
+                        #Register a page, along with it's child URL's, to be shown / saved as file
+                        directory[entry_url].add(url)
         if link_set == None:
             raise RuntimeError("Ignoring "+ entry_url + ", malformed xml/sitemap")
         #Converting set into list for serialising    
