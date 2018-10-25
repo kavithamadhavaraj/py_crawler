@@ -144,7 +144,7 @@ class Crawler(object):
         return self.directory
 
     def engage(self):
-        print "\nCrawler engaged"
+        print "\nCrawler engaged, to interrupt press Ctrl+C or Command + dot/period"
         print "-"*20
         #Initiate the crawler, by placing the first URL in the processing queue
         self.crawler_queue.put(clean_url(self.root))
